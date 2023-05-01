@@ -17,7 +17,6 @@
 
 //! I/O host interface for substrate runtime.
 
-#![warn(missing_docs)]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(enable_alloc_error_handler, feature(alloc_error_handler))]
 #![cfg_attr(
@@ -59,7 +58,7 @@ use sp_core::{
 use sp_trie::{LayoutV0, LayoutV1, TrieConfiguration};
 
 use sp_runtime_interface::{
-	pass_by::{PassBy, PassByCodec},
+	pass_by::{PassBy, PassByCodec, PassByEnum},
 	runtime_interface, Pointer,
 };
 
@@ -1633,6 +1632,47 @@ mod tracing_setup {
 
 pub use tracing_setup::init_tracing;
 
+#[derive(PassByEnum, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RiscvExecOutcome {
+	Ok = 0,
+	OutOfGas = 1,
+	Trap = 2,
+	InvalidImage = 3,
+}
+
+#[repr(C)]
+pub struct RiscvSharedState {
+	pub fuel_left: u64,
+	pub exit: bool,
+}
+
+#[runtime_interface(wasm_only)]
+pub trait Riscv {
+	fn execute(
+		&mut self,
+		program: &[u8],
+		a0: u32,
+		syscall_handler: u32,
+		state_ptr: u32,
+	) -> RiscvExecOutcome {
+		let outcome = self
+			.riscv()
+			.execute(program, a0, syscall_handler, state_ptr)
+			.expect("execution failed");
+		TryFrom::try_from(outcome).expect("Invalid error")
+	}
+
+	fn read_memory(&mut self, offset: u32, buf_ptr: u32, buf_len: u32) -> bool {
+		self.riscv().read_memory(offset, buf_ptr, buf_len).expect("memory access error")
+	}
+
+	fn write_memory(&mut self, offset: u32, buf_ptr: u32, buf_len: u32) -> bool {
+		self.riscv()
+			.write_memory(offset, buf_ptr, buf_len)
+			.expect("memory access error")
+	}
+}
+
 /// Allocator used by Substrate when executing the Wasm runtime.
 #[cfg(all(target_arch = "wasm32", not(feature = "std")))]
 struct WasmAllocator;
@@ -1711,6 +1751,7 @@ pub type SubstrateHostFunctions = (
 	crate::trie::HostFunctions,
 	offchain_index::HostFunctions,
 	transaction_index::HostFunctions,
+	riscv::HostFunctions,
 );
 
 #[cfg(test)]

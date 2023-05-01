@@ -123,6 +123,10 @@ impl FunctionContext for FunctionExecutor {
 			.map_err(|e| e.to_string())
 	}
 
+	fn riscv(&mut self) -> &mut dyn sp_wasm_interface::Riscv {
+		todo!()
+	}
+
 	fn register_panic_error_message(&mut self, message: &str) {
 		self.panic_message = Some(message.to_owned());
 	}
