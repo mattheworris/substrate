@@ -154,6 +154,16 @@ fn format_default(field: &Ident) -> TokenStream2 {
 	}
 }
 
+/// The target for which to generate host functions.
+enum Target {
+	/// Empty implementations which are just used for validation.
+	Dummy,
+	/// Generate code to register host functions with wasmi.
+	Wasm,
+	/// Generate code to be placed in a riscv syscall handler.
+	RiscV,
+}
+
 /// Parsed environment definition.
 struct EnvDef {
 	host_funcs: Vec<HostFn>,
@@ -187,6 +197,13 @@ impl HostFnReturn {
 		};
 		quote! {
 			::core::result::Result<#ok, ::wasmi::core::Trap>
+		}
+	}
+
+	fn riscv_ret_map(&self) -> TokenStream2 {
+		match self {
+			Self::Unit => quote! { |_| 0u64 },
+			_ => quote! { ::core::convert::Into::into },
 		}
 	}
 }
@@ -560,8 +577,9 @@ fn expand_env(def: &EnvDef, docs: bool) -> TokenStream2 {
 ///   - real implementation, to register it in the contract execution environment;
 ///   - dummy implementation, to be used as mocks for contract validation step.
 fn expand_impls(def: &EnvDef) -> TokenStream2 {
-	let impls = expand_functions(def, true, quote! { crate::wasm::Runtime<E> });
-	let dummy_impls = expand_functions(def, false, quote! { () });
+	let dummy_impls = expand_functions(def, Target::Dummy, quote! { () });
+	let wasm_impls = expand_functions(def, Target::Wasm, quote! { crate::wasm::Runtime<E> });
+	let riscv_impls = expand_functions(def, Target::RiscV, quote! {});
 
 	quote! {
 		impl<'a, E: Ext> crate::wasm::Environment<crate::wasm::runtime::Runtime<'a, E>> for Env
@@ -572,7 +590,7 @@ fn expand_impls(def: &EnvDef) -> TokenStream2 {
 				allow_unstable: AllowUnstableInterface,
 				allow_deprecated: AllowDeprecatedInterface,
 			) -> Result<(),::wasmi::errors::LinkerError> {
-				#impls
+				#wasm_impls
 				Ok(())
 			}
 		}
@@ -589,13 +607,37 @@ fn expand_impls(def: &EnvDef) -> TokenStream2 {
 				Ok(())
 			}
 		}
+
+		extern "C" fn riscv_syscall_handler<E: Ext>(
+			__state__: &mut ::sp_io::RiscvState<crate::wasm::Runtime<E>>,
+			__a0__: u32,
+			__a1__: u32,
+			_a2: u32,
+			_a3: u32,
+			_a4: u32,
+			_a5: u32,
+		) -> u64 {
+			#riscv_impls
+		}
 	}
 }
 
-fn expand_functions(def: &EnvDef, expand_blocks: bool, host_state: TokenStream2) -> TokenStream2 {
-	let impls = def.host_funcs.iter().map(|f| {
+fn expand_functions(def: &EnvDef, target: Target, host_state: TokenStream2) -> TokenStream2 {
+	let impls = def.host_funcs.iter().enumerate().map(|(idx, f)| {
 		// skip the context and memory argument
 		let params = f.item.sig.inputs.iter().skip(2);
+		let param_names = params.clone().filter_map(|arg| {
+			let FnArg::Typed(arg) = arg else {
+				return None;
+			};
+			Some(&arg.pat)
+		});
+		let param_types = params.clone().filter_map(|arg| {
+			let FnArg::Typed(arg) = arg else {
+				return None;
+			};
+			Some(&arg.ty)
+		});
 
 		let (module, name, body, wasm_output, output) = (
 			f.module(),
@@ -606,6 +648,7 @@ fn expand_functions(def: &EnvDef, expand_blocks: bool, host_state: TokenStream2)
 		);
 		let is_stable = f.is_stable;
 		let not_deprecated = f.not_deprecated;
+		let idx = idx as u32;
 
 		// wrapped host function body call with host function traces
 		// see https://github.com/paritytech/substrate/tree/master/frame/contracts#host-function-tracing
@@ -644,62 +687,120 @@ fn expand_functions(def: &EnvDef, expand_blocks: bool, host_state: TokenStream2)
 		// - We replace any code by unreachable!
 		// - Allow unused variables as the code that uses is not expanded
 		// - We don't need to map the error as we simply panic if they code would ever be executed
-		let inner = if expand_blocks {
-			quote! { || #output {
-				let (memory, ctx) = __caller__
-					.data()
-					.memory()
-					.expect("Memory must be set when setting up host data; qed")
-					.data_and_store_mut(&mut __caller__);
-				#wrapped_body_with_trace
-			} }
-		} else {
-			quote! { || -> #wasm_output {
-				// This is part of the implementation for `Environment<()>` which is not
-				// meant to be actually executed. It is only for validation which will
-				// never call host functions.
-				::core::unreachable!()
-			} }
-		};
-		let map_err = if expand_blocks {
-			quote! {
-				|reason| {
-					::wasmi::core::Trap::from(reason)
-				}
-			}
-		} else {
-			quote! {
-				|reason| { reason }
-			}
-		};
-		let allow_unused =  if expand_blocks {
-			quote! { }
-		} else {
-			quote! { #[allow(unused_variables)] }
-		};
+		let inner = match target {
+			Target::Dummy => {
+				quote! { || -> #wasm_output {
+					// This is part of the implementation for `Environment<()>` which is not
+					// meant to be actually executed. It is only for validation which will
+					// never call host functions.
+					::core::unreachable!()
+				}}
+			},
+			Target::Wasm => {
+				quote! { || #output {
+					let (memory, ctx) = __caller__
+						.data()
+						.memory()
+						.expect("Memory must be set when setting up host data; qed")
+						.data_and_store_mut(&mut __caller__);
+					#wrapped_body_with_trace
+				}}
+			},
+			Target::RiscV => {
+				quote! { || #output {
+					let (#( #param_names, )*): (#( #param_types, )*) = ctx.read_sandbox_memory_as(memory, __a1__)?;
+					#wrapped_body_with_trace
+				}}
 
-		quote! {
+			}
+		};
+		let map_err = match target {
+			Target::Dummy => {
+				quote! { |reason| { reason } }
+			},
+			Target::Wasm => {
+				quote! { |reason| {
+					::wasmi::core::Trap::from(reason)
+				}}
+			},
+			Target::RiscV => {
+				quote! {}
+			}
+		};
+		let allow_unused = match target {
+			Target::Dummy => {
+				quote! { #[allow(unused_variables)] }
+			}
+			_ => {
+				quote! {}
+			},
+		};
+		let is_enabled = quote! {
 			// We need to allow all interfaces when runtime benchmarks are performed because
 			// we generate the weights even when those interfaces are not enabled. This
 			// is necessary as the decision whether we allow unstable or deprecated functions
 			// is a decision made at runtime. Generation of the weights happens statically.
-			if ::core::cfg!(feature = "runtime-benchmarks") ||
+			::core::cfg!(feature = "runtime-benchmarks") ||
 				((#is_stable || __allow_unstable__) && (#not_deprecated || __allow_deprecated__))
-			{
-				#allow_unused
-				linker.define(#module, #name, ::wasmi::Func::wrap(&mut*store, |mut __caller__: ::wasmi::Caller<#host_state>, #( #params, )*| -> #wasm_output {
-					let mut func = #inner;
-					func()
-						.map_err(#map_err)
-						.map(::core::convert::Into::into)
-				}))?;
-			}
+		};
+
+		match target {
+			Target::Dummy | Target::Wasm => {
+				quote! {
+					if #is_enabled {
+						#allow_unused
+						linker.define(#module, #name, ::wasmi::Func::wrap(&mut*store, |mut __caller__: ::wasmi::Caller<#host_state>, #( #params, )*| -> #wasm_output {
+							let mut func = #inner;
+							func()
+								.map_err(#map_err)
+								.map(::core::convert::Into::into)
+						}))?;
+					}
+				}
+			},
+			Target::RiscV => {
+				quote! {
+					#idx if #is_enabled => {
+						let mut func = #inner;
+						match func() {
+							// TODO
+							Ok(outcome) => 0,
+							Err(err) => {
+								// TODO: store the trap reason into runtime
+								// stop the execution
+								__state__.exit = true;
+								// this value is never used in case of exit
+								0
+							}
+						}
+					},
+				}
+			},
 		}
 	});
-	quote! {
-		let __allow_unstable__ = matches!(allow_unstable, AllowUnstableInterface::Yes);
-		let __allow_deprecated__ = matches!(allow_deprecated, AllowDeprecatedInterface::Yes);
-		#( #impls )*
+
+	match target {
+		Target::Dummy | Target::Wasm => {
+			quote! {
+				let __allow_unstable__ = matches!(allow_unstable, AllowUnstableInterface::Yes);
+				let __allow_deprecated__ = matches!(allow_deprecated, AllowDeprecatedInterface::Yes);
+				#( #impls )*
+			}
+		},
+		Target::RiscV => {
+			quote! {
+				// TODO
+				let __allow_unstable__ = true;
+				let __allow_deprecated__ = true;
+				// TODO
+				let memory = &mut [0u8; 0];
+				let ctx = unsafe { &mut __state__.user };
+				match __a0__ {
+					#( #impls )*
+					_ => todo!(),
+				}
+			}
+		},
 	}
 }
 

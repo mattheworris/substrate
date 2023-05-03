@@ -124,8 +124,14 @@ impl From<ExecReturnValue> for ReturnCode {
 }
 
 impl From<ReturnCode> for u32 {
-	fn from(code: ReturnCode) -> u32 {
-		code as u32
+	fn from(code: ReturnCode) -> Self {
+		code as Self
+	}
+}
+
+impl From<ReturnCode> for u64 {
+	fn from(code: ReturnCode) -> u64 {
+		(code as u32).into()
 	}
 }
 
