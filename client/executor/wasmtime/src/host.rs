@@ -22,7 +22,7 @@
 use crate::{instance_wrapper::MemoryWrapper, runtime::StoreData, util};
 use core::ops::ControlFlow;
 use sc_allocator::{AllocationStats, FreeingBumpHeapAllocator};
-use sp_io::{RiscvExecOutcome, RiscvSharedState};
+use sp_io::{RiscvExecOutcome, RiscvState};
 use sp_wasm_interface::{Pointer, WordSize};
 use std::mem::size_of;
 use wasmtime::{AsContext, Caller, TypedFunc};
@@ -243,7 +243,7 @@ struct RiscvInstance {
 }
 
 impl<'a, 'b> RiscvContext<'a, 'b> {
-	fn shared_state_mut(&mut self) -> Option<&mut RiscvSharedState> {
+	fn shared_state_mut(&mut self) -> Option<&mut RiscvState<()>> {
 		let offset = self.data.state_ptr as usize;
 		let buf = self
 			.host_context
@@ -252,8 +252,8 @@ impl<'a, 'b> RiscvContext<'a, 'b> {
 			.data()
 			.memory()
 			.data_mut(&mut self.host_context.caller);
-		let scoped = buf.get_mut(offset..offset.saturating_add(size_of::<RiscvSharedState>()))?;
-		unsafe { Some(&mut *(scoped.as_mut_ptr() as *mut RiscvSharedState)) }
+		let scoped = buf.get_mut(offset..offset.saturating_add(size_of::<RiscvState<()>>()))?;
+		unsafe { Some(&mut *(scoped.as_mut_ptr() as *mut _)) }
 	}
 }
 

@@ -22,7 +22,7 @@ use sp_core::{ed25519, sr25519};
 use sp_io::{
 	crypto::{ed25519_verify, sr25519_verify},
 	hashing::{blake2_128, blake2_256, sha2_256, twox_128, twox_256},
-	storage, wasm_tracing, RiscvExecOutcome, RiscvSharedState,
+	storage, wasm_tracing, RiscvExecOutcome, RiscvState,
 };
 #[cfg(not(feature = "std"))]
 use sp_runtime::{
@@ -405,12 +405,11 @@ mod output_validity {
 #[cfg(not(feature = "std"))]
 fn execute_riscv(program: &[u8]) {
 	struct State {
-		shared: RiscvSharedState,
 		counter: u64,
 	}
 
 	unsafe extern "C" fn syscall_handler(
-		state: *mut State,
+		state: &mut RiscvState<State>,
 		a0: u32,
 		a1: u32,
 		_a2: u32,
@@ -421,21 +420,18 @@ fn execute_riscv(program: &[u8]) {
 		match a0 {
 			// read counter
 			1 => {
-				let state = &*state;
-				let buf = state.counter.to_le_bytes();
+				let buf = state.user.counter.to_le_bytes();
 				sp_io::riscv::write_memory(a1, buf.as_ptr() as u32, buf.len() as u32);
 			},
 			// increment counter
 			2 => {
-				let state = &mut *state;
 				let mut buf = [0u8; 8];
 				sp_io::riscv::read_memory(a1, buf.as_mut_ptr() as u32, buf.len() as u32);
-				state.counter += u64::from_le_bytes(buf);
+				state.user.counter += u64::from_le_bytes(buf);
 			},
 			// exit (`ret` from entry point is not possible)
 			3 => {
-				let state = &mut *state;
-				state.shared.exit = true;
+				state.exit = true;
 			},
 			_ => panic!("unknown syscall: {}", a0),
 		}
@@ -443,23 +439,23 @@ fn execute_riscv(program: &[u8]) {
 	}
 
 	// start counter at 0 (passed in a0)
-	let mut state = State { shared: RiscvSharedState { fuel_left: 0, exit: false }, counter: 0 };
+	let mut state = RiscvState { fuel_left: 0, exit: false, user: State { counter: 0 } };
 	let ret =
 		sp_io::riscv::execute(program, 0, syscall_handler as u32, &mut state as *mut _ as u32);
 	assert_eq!(ret, RiscvExecOutcome::Ok);
-	assert_eq!(state.counter, 8);
+	assert_eq!(state.user.counter, 8);
 
 	// start counter at 21 (passed in a0)
-	let mut state = State { shared: RiscvSharedState { fuel_left: 0, exit: false }, counter: 0 };
+	let mut state = RiscvState { fuel_left: 0, exit: false, user: State { counter: 0 } };
 	let ret =
 		sp_io::riscv::execute(program, 21, syscall_handler as u32, &mut state as *mut _ as u32);
 	assert_eq!(ret, RiscvExecOutcome::Ok);
-	assert_eq!(state.counter, 29);
+	assert_eq!(state.user.counter, 29);
 
 	// pass 42 which makes the contract panic without doing any work
-	let mut state = State { shared: RiscvSharedState { fuel_left: 0, exit: false }, counter: 0 };
+	let mut state = RiscvState { fuel_left: 0, exit: false, user: State { counter: 0 } };
 	let ret =
 		sp_io::riscv::execute(program, 42, syscall_handler as u32, &mut state as *mut _ as u32);
 	assert_eq!(ret, RiscvExecOutcome::Trap);
-	assert_eq!(state.counter, 0);
+	assert_eq!(state.user.counter, 0);
 }

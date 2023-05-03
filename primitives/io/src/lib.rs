@@ -1640,10 +1640,14 @@ pub enum RiscvExecOutcome {
 	InvalidImage = 3,
 }
 
+pub type RiscvSyscallHandler<T> =
+	fn(state: &mut RiscvState<T>, a0: u32, a1: u32, a2: u32, a3: u32, a4: u32, a5: u32) -> u64;
+
 #[repr(C)]
-pub struct RiscvSharedState {
+pub struct RiscvState<T> {
 	pub fuel_left: u64,
 	pub exit: bool,
+	pub user: T,
 }
 
 #[runtime_interface(wasm_only)]
