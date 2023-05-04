@@ -4930,6 +4930,22 @@ fn add_dependency_works() {
 
 		// since calling remove the dependency we should be able to remove the code
 		assert_ok!(Contracts::remove_code(RuntimeOrigin::signed(ALICE), code_hash));
+
+		// calling should not work anymnore
+		assert_err!(
+			<Pallet<Test>>::bare_call(
+				ALICE,
+				addr_caller.clone(),
+				0,
+				GAS_LIMIT,
+				None,
+				code_hash.encode(),
+				false,
+				Determinism::Relaxed,
+			)
+			.result,
+			Error::<Test>::ContractTrapped,
+		);
 	});
 }
 
