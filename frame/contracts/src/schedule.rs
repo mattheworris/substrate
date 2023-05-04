@@ -431,6 +431,10 @@ pub struct HostFnWeights<T: Config> {
 	/// Weight of calling `instantiation_nonce`.
 	pub instantiation_nonce: Weight,
 
+	/// Weight of calling `instantiation_nonce`.
+	pub add_dependency: Weight,
+	pub remove_dependency: Weight,
+
 	/// The type parameter is used in the default implementation.
 	#[codec(skip)]
 	pub _phantom: PhantomData<T>,
@@ -637,6 +641,8 @@ impl<T: Config> Default for HostFnWeights<T> {
 			reentrance_count: cost!(seal_reentrance_count),
 			account_reentrance_count: cost!(seal_account_reentrance_count),
 			instantiation_nonce: cost!(seal_instantiation_nonce),
+			add_dependency: cost!(add_dependency),
+			remove_dependency: cost!(remove_dependency),
 			_phantom: PhantomData,
 		}
 	}

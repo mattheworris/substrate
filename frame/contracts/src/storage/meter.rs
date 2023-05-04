@@ -406,6 +406,19 @@ where
 		};
 	}
 
+	pub fn charge_dependency(
+		&mut self,
+		deposit_account: &DepositAccount<T>,
+		amount: &DepositOf<T>,
+	) {
+		let charge = Charge {
+			deposit_account: deposit_account.clone(),
+			amount: amount.clone(),
+			terminated: false,
+		};
+		self.charges.push(charge);
+	}
+
 	/// Charge from `origin` a storage deposit for contract instantiation.
 	///
 	/// This immediately transfers the balance in order to create the account.
@@ -664,6 +677,7 @@ mod tests {
 			storage_byte_deposit: info.bytes_deposit,
 			storage_item_deposit: info.items_deposit,
 			storage_base_deposit: Default::default(),
+			dependencies: Default::default(),
 		}
 	}
 

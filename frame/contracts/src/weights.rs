@@ -169,6 +169,8 @@ pub trait WeightInfo {
 	fn instr_i64shru(r: u32, ) -> Weight;
 	fn instr_i64rotl(r: u32, ) -> Weight;
 	fn instr_i64rotr(r: u32, ) -> Weight;
+	fn add_dependency(_r: u32, ) -> Weight { Weight::zero() }
+	fn remove_dependency(_r: u32, ) -> Weight { Weight::zero() }
 }
 
 /// Weights for pallet_contracts using the Substrate node and recommended hardware.

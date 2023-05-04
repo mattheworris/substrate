@@ -111,6 +111,10 @@ pub enum ReturnCode {
 	EcdsaRecoverFailed = 11,
 	/// sr25519 signature verification failed.
 	Sr25519VerifyFailed = 12,
+	/// Add Contract Dependency failed.
+	AddDependencyFailed = 13,
+	/// Remove Contract Dependency failed.
+	RemoveDependencyFailed = 15,
 }
 
 impl From<ExecReturnValue> for ReturnCode {
@@ -218,11 +222,17 @@ pub enum RuntimeCosts {
 	/// Weight of calling `seal_random`. It includes the weight for copying the subject.
 	Random,
 	/// Weight of calling `seal_deposit_event` with the given number of topics and event size.
-	DepositEvent { num_topic: u32, len: u32 },
+	DepositEvent {
+		num_topic: u32,
+		len: u32,
+	},
 	/// Weight of calling `seal_debug_message` per byte of passed message.
 	DebugMessage(u32),
 	/// Weight of calling `seal_set_storage` for the given storage item sizes.
-	SetStorage { old_bytes: u32, new_bytes: u32 },
+	SetStorage {
+		old_bytes: u32,
+		new_bytes: u32,
+	},
 	/// Weight of calling `seal_clear_storage` per cleared byte.
 	ClearStorage(u32),
 	/// Weight of calling `seal_contains_storage` per byte of the checked item.
@@ -242,7 +252,10 @@ pub enum RuntimeCosts {
 	/// Weight per byte that is cloned by supplying the `CLONE_INPUT` flag.
 	CallInputCloned(u32),
 	/// Weight of calling `seal_instantiate` for the given input length and salt.
-	InstantiateBase { input_data_len: u32, salt_len: u32 },
+	InstantiateBase {
+		input_data_len: u32,
+		salt_len: u32,
+	},
 	/// Weight of the transfer performed during an instantiate.
 	InstantiateSurchargeTransfer,
 	/// Weight of calling `seal_hash_sha_256` for the given input size.
@@ -271,6 +284,8 @@ pub enum RuntimeCosts {
 	AccountEntranceCount,
 	/// Weight of calling `instantiation_nonce`
 	InstantationNonce,
+	AddDependency,
+	RemoveDependency,
 }
 
 impl RuntimeCosts {
@@ -353,6 +368,8 @@ impl RuntimeCosts {
 			ReentrantCount => s.reentrance_count,
 			AccountEntranceCount => s.account_reentrance_count,
 			InstantationNonce => s.instantiation_nonce,
+			AddDependency => s.add_dependency,
+			RemoveDependency => s.remove_dependency,
 		};
 		RuntimeToken {
 			#[cfg(test)]
@@ -2813,5 +2830,21 @@ pub mod env {
 	fn instantiation_nonce(ctx: _, _memory: _) -> Result<u64, TrapReason> {
 		ctx.charge_gas(RuntimeCosts::InstantationNonce)?;
 		Ok(ctx.ext.nonce())
+	}
+
+	#[unstable]
+	fn add_dependency(ctx: _, memory: _, code_hash_ptr: u32) -> Result<ReturnCode, TrapReason> {
+		ctx.charge_gas(RuntimeCosts::AddDependency)?;
+		let code_hash = ctx.read_sandbox_memory_as(memory, code_hash_ptr)?;
+		ctx.ext.add_dependency(code_hash)?;
+		Ok(ReturnCode::Success)
+	}
+
+	#[unstable]
+	fn remove_dependency(ctx: _, memory: _, code_hash_ptr: u32) -> Result<ReturnCode, TrapReason> {
+		ctx.charge_gas(RuntimeCosts::RemoveDependency)?;
+		let code_hash = ctx.read_sandbox_memory_as(memory, code_hash_ptr)?;
+		ctx.ext.remove_dependency(code_hash)?;
+		Ok(ReturnCode::Success)
 	}
 }

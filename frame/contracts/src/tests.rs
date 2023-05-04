@@ -4885,6 +4885,55 @@ fn delegate_call_indeterministic_code() {
 }
 
 #[test]
+fn add_dependency_works() {
+	let (wasm_caller, _) = compile_module::<Test>("add_dependency").unwrap();
+	let (wasm_callee, code_hash) = compile_module::<Test>("dummy").unwrap();
+	ExtBuilder::default().existential_deposit(200).build().execute_with(|| {
+		let _ = Balances::deposit_creating(&ALICE, 1_000_000);
+
+		Contracts::bare_upload_code(ALICE, wasm_callee, None, Determinism::Enforced).unwrap();
+
+		let addr_caller = Contracts::bare_instantiate(
+			ALICE,
+			0,
+			GAS_LIMIT,
+			None,
+			Code::Upload(wasm_caller),
+			code_hash.encode(),
+			vec![],
+			false,
+		)
+		.result
+		.unwrap()
+		.account_id;
+
+		// removing the code should fail
+		assert_err!(
+			Contracts::remove_code(RuntimeOrigin::signed(ALICE), code_hash),
+			<Error<Test>>::CodeInUse
+		);
+
+		// calling should work
+		assert_ok!(
+			<Pallet<Test>>::bare_call(
+				ALICE,
+				addr_caller.clone(),
+				0,
+				GAS_LIMIT,
+				None,
+				code_hash.encode(),
+				false,
+				Determinism::Relaxed,
+			)
+			.result
+		);
+
+		// since calling remove the dependency we should be able to remove the code
+		assert_ok!(Contracts::remove_code(RuntimeOrigin::signed(ALICE), code_hash));
+	});
+}
+
+#[test]
 fn reentrance_count_works_with_call() {
 	let (wasm, _code_hash) = compile_module::<Test>("reentrance_count_call").unwrap();
 

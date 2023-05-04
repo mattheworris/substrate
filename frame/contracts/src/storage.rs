@@ -33,10 +33,11 @@ use frame_support::{
 	DefaultNoBound, RuntimeDebugNoBound,
 };
 use scale_info::TypeInfo;
+use sp_core::ConstU32;
 use sp_io::KillStorageResult;
 use sp_runtime::{
 	traits::{Hash, Saturating, Zero},
-	RuntimeDebug,
+	BoundedBTreeMap, DispatchResult, RuntimeDebug,
 };
 use sp_std::{marker::PhantomData, ops::Deref, prelude::*};
 
@@ -66,6 +67,8 @@ pub struct ContractInfo<T: Config> {
 	/// We need to store this information separately so it is not used when calculating any refunds
 	/// since the base deposit can only ever be refunded on contract termination.
 	storage_base_deposit: BalanceOf<T>,
+
+	dependencies: BoundedBTreeMap<CodeHash<T>, BalanceOf<T>, ConstU32<32>>,
 }
 
 impl<T: Config> ContractInfo<T> {
@@ -101,6 +104,7 @@ impl<T: Config> ContractInfo<T> {
 			storage_byte_deposit: Zero::zero(),
 			storage_item_deposit: Zero::zero(),
 			storage_base_deposit: Zero::zero(),
+			dependencies: Default::default(),
 		};
 
 		Ok(contract)
@@ -199,6 +203,20 @@ impl<T: Config> ContractInfo<T> {
 			(Some(old_len), None) => WriteOutcome::Overwritten(old_len),
 			(Some(_), Some(old_value)) => WriteOutcome::Taken(old_value),
 		})
+	}
+
+	pub fn add_dependency(
+		&mut self,
+		code_hash: CodeHash<T>,
+		amount: BalanceOf<T>,
+	) -> DispatchResult {
+		self.dependencies
+			.try_insert(code_hash, amount)
+			.map_err(|_| Error::<T>::MaxDependenciesReached.into())
+			.map(|_| ())
+	}
+	pub fn remove_dependency(&mut self, dep: CodeHash<T>) -> Result<BalanceOf<T>, DispatchError> {
+		self.dependencies.remove(&dep).ok_or(Error::<T>::DependencyNotFound.into())
 	}
 
 	/// Push a contract's trie to the deletion queue for lazy removal.

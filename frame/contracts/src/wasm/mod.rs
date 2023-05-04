@@ -32,6 +32,7 @@ pub use crate::wasm::runtime::api_doc;
 pub use tests::MockExt;
 
 pub use crate::wasm::{
+	code_cache::{decrement_refcount, increment_refcount},
 	prepare::TryInstantiate,
 	runtime::{
 		AllowDeprecatedInterface, AllowUnstableInterface, CallFlags, Environment, ReturnCode,
@@ -288,6 +289,10 @@ impl<T: Config> OwnerInfo<T> {
 	#[cfg(test)]
 	pub fn refcount(&self) -> u64 {
 		self.refcount
+	}
+
+	pub fn deposit(&self) -> BalanceOf<T> {
+		self.deposit
 	}
 }
 
@@ -643,6 +648,14 @@ mod tests {
 		}
 		fn nonce(&mut self) -> u64 {
 			995
+		}
+
+		fn add_dependency(&mut self, _code: CodeHash<Self::T>) -> Result<(), DispatchError> {
+			todo!()
+		}
+
+		fn remove_dependency(&mut self, _code: CodeHash<Self::T>) -> Result<(), DispatchError> {
+			todo!()
 		}
 	}
 

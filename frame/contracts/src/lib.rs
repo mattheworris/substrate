@@ -859,6 +859,9 @@ pub mod pallet {
 		CodeRejected,
 		/// An indetermistic code was used in a context where this is not permitted.
 		Indeterministic,
+		/// The contract
+		MaxDependenciesReached,
+		DependencyNotFound,
 	}
 
 	/// A mapping from an original code hash to the original code, untouched by instrumentation.
